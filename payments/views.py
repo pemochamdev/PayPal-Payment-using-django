@@ -19,8 +19,8 @@ class PaymentViewSet(viewsets.ModelViewSet):
             amount = float(request.data.get('amount'))
             description = request.data.get('description', '')
             base_url = request.build_absolute_uri('/')[:-1]
-            return_url = f'{base_url}/api/payments/execute'
-            cancel_url = f'{base_url}/api/payments/cancel'
+            return_url = f'{base_url}/api/payments/execute/'
+            cancel_url = f'{base_url}/api/payments/cancel/'
             payment = self.paypal_service.create_payment(
                 amount, description, return_url, cancel_url
             )

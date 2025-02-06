@@ -20,7 +20,7 @@ class Payment(Base):
         REFUNDED = 'refunded', _('Refunded')
         PARTIALLY_REFUNDED = 'partially_refunded', _('Partially Refunded')
         
-    payment_id = models.UUIDField(default=uuid.uuid4, editable=False)
+    payment_id = models.CharField(max_length=255, blank=True, null=True)
     currency = models.CharField(max_length=3, default='EUR')
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     status = models.CharField(
@@ -49,7 +49,7 @@ class Payment(Base):
 
 class PaymentRefund(Base):
     payment = models.ForeignKey(Payment, on_delete=models.CASCADE, related_name='refunds')
-    refund_id = models.UUIDField(default=uuid.uuid4, editable=False)
+    refund_id = models.CharField(max_length=255, blank=True, null=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     status = models.CharField(
         max_length=20,

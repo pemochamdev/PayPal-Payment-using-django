@@ -1,6 +1,7 @@
 import logging
 import paypalrestsdk
 from django.conf import settings
+from decimal import Decimal
 from payments.models import Payment, PaymentRefund
 from payments.exceptions import PaymentError, PaymentValidationError, PaymentProcessError, RefundError
 
@@ -29,11 +30,9 @@ class PaymentService:
         try:
             self._validate_payment(amount)
             
-            payment = paypalrestsdk.Payment({
+            payment_data = {
                 'intent': 'sale',
-                'payer': {
-                    'payment_method': 'paypal',
-                },
+                'payment_method': 'paypal',
                 'transactions': [{
                     'amount': {
                         'total': str(amount),
@@ -45,23 +44,41 @@ class PaymentService:
                     'return_url':  settings.PAYPAL_CONFIG['PAYPAL_SUCCESS_URL'],    
                     'cancel_url':  settings.PAYPAL_CONFIG['PAYPAL_CANCEL_URL'],
                 },
-            })
-            
+            }
+            logger.debug(f"PayPal payment data: {payment_data}")
+            payment = paypalrestsdk.Payment(payment_data)
             if not payment.create():
+                logger.error(f"Erreur création PayPal: {payment.error}")
                 raise PaymentProcessError(
                     f"Erreur lors de la création du paiement PayPal: {payment.error}",
                     code='payment_creation_failed'
                 )
             
+            logger.info(f"Paiement PayPal créé: {payment.id}")
+            logger.debug(f"Payment response: {payment}")
+            
             db_payment = Payment.objects.create(
                 payment_id=payment.id,
-                amount=amount,
+                amount=Decimal(str(amount)),
                 currency=settings.PAYPAL_CONFIG['PAYPAL_CURRENCY'],
                 description=description
             )
             
+            # Trouver l'URL d'approbation
+            approval_url = None
+            for link in payment.links:
+                logger.debug(f"Payment link: {link}")
+                if link.rel == "approval_url":
+                    approval_url = link.href
+                    break
+
+            if not approval_url:
+                raise PaymentProcessError("URL d'approbation non trouvée")
+
+            
             return {
-                'payment_id': db_payment.payment_id,
+                'id': str(db_payment.id),
+                'payment_id': db_payment.id,
                 'approval_url': next(link.href for link in payment.links if link.rel == 'approval_url')
             }
         except PaymentValidationError as e:
@@ -75,19 +92,52 @@ class PaymentService:
     
     def execute_payment(self, payment_id,payer_id):
         try:
-            payment = paypalrestsdk.Payment.find(payment_id)
-            if not payment.execute({"payer_id": payer_id}):
-                raise PaymentProcessError(
-                    f"Erreur lors de l'exécution du paiement PayPal: {payment.error}",
-                    code='payment_execution_failed'
-                )
+            logger.info(f"Début exécution paiement - PayPal ID: {payment_id}, Payer ID: {payer_id}")
             
-            db_payment = Payment.objects.get(payment_id=payment_id)
-            db_payment.status = Payment.Status.COMPLETED
-            db_payment.payer_id = payer_id
-            db_payment.payer_email = payment.payer.payer_info.email
-            db_payment.save()
+              # Vérifier les paramètres
+            if not payment_id or not payer_id:
+                raise PaymentValidationError("PayPal Payment ID et Payer ID sont requis")
+
+            # Trouver le paiement dans notre base
+            db_payment = Payment.objects.filter(payment_id=payment_id).first()
+            if not db_payment:
+                logger.error(f"Paiement non trouvé en base: {payment_id}")
+                raise PaymentError("Paiement non trouvé")
+
+            # Récupérer le paiement PayPal
+            try:
+                payment = paypalrestsdk.Payment.find(payment_id)
+                logger.debug(f"Payment trouvé sur PayPal: {payment}")
+            except Exception as e:
+                logger.error(f"Erreur recherche paiement PayPal: {str(e)}")
+                raise PaymentError("Paiement PayPal introuvable")
+
+            # Exécuter le paiement
+            execute_data = {"payer_id": payer_id}
+            logger.debug(f"Executing payment with data: {execute_data}")
             
+            if not payment.execute(execute_data):
+                logger.error(f"Échec exécution: {payment.error}")
+                db_payment.status = Payment.PaymentStatus.FAILED
+                db_payment.error_message = str(payment.error)
+                db_payment.save()
+                raise PaymentProcessError(f"Échec de l'exécution: {payment.error}")
+
+            
+            
+            try:
+                payer_info = payment.payer.payer_info
+                logger.debug(f"Payer info: {payer_info}")
+                db_payment.status = Payment.Status.COMPLETED
+                db_payment.payer_id = payer_id
+                if hasattr(payer_info, 'email'):
+                    db_payment.payer_email = payer_info.email
+                db_payment.save()
+                logger.info(f"Paiement exécuté avec succès: {payment_id}")
+                
+            except AttributeError as e:
+                logger.error(f"Erreur lors de l'accès aux informations du payeur: {str(e)}")
+                
             return db_payment
         except Payment.DoesNotExist:
             raise PaymentError("Paiement introuvable")

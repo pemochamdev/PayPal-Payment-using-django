@@ -120,4 +120,7 @@ PAYPAL_CONFIG = {
     "PAYPAL_CLIENT_ID": decouple_config("PAYPAL_CLIENT_ID"),
     "PAYPAL_CLIENT_SECRET": decouple_config("PAYPAL_CLIENT_SECRET"),
     "PAYPAL_CURRENCY": decouple_config("PAYPAL_CURRENCY"),
+    "PAYPAL_SUCCESS_URL": decouple_config("PAYPAL_SUCCESS_URL"),
+    "PAYPAL_CANCEL_URL": decouple_config("PAYPAL_CANCEL_URL"),
+
 }
